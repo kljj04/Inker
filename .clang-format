@@ -1,0 +1,43 @@
+# .clang-format
+# Inker Project
+# Copyright (C) 2026 Inker Developer kljj04
+
+BasedOnStyle: LLVM
+Language: Cpp
+IndentWidth: 4
+TabWidth: 4
+UseTab: Never
+ColumnLimit: 12000
+PointerAlignment: Right
+DerivePointerAlignment: false
+AllowShortFunctionsOnASingleLine: None
+AlwaysBreakAfterReturnType: None
+BinPackParameters: true
+BinPackArguments: true
+BreakBeforeBraces: Allman
+SpaceBeforeParens: ControlStatements
+SpaceAfterCStyleCast: true
+AlignConsecutiveAssignments:
+    Enabled: true
+    AcrossEmptyLines: false
+    AcrossComments: false
+    AlignCompound: false
+    PadOperators: true
+AlignConsecutiveDeclarations:
+    Enabled: true
+    AcrossEmptyLines: false
+    AcrossComments: false
+    AlignCompound: false
+    AlignFunctionPointers: true
+    PadOperators: true
+AlignConsecutiveMacros:
+    Enabled: true
+    AcrossEmptyLines: false
+    AcrossComments: false
+    AlignCompound: false
+    AlignFunctionPointers: false
+    PadOperators: false
+SortIncludes: false
+IndentCaseLabels: true
+AlwaysBreakTemplateDeclarations: Yes
+NamespaceIndentation: None
