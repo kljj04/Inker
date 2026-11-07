@@ -21,6 +21,8 @@ struct DIAGNOSTIC
     SIZE             Length;
     DIAGNOSTIC_LEVEL Level;
     STRING           Message;
+    STRING           FixIt{};
 };
 
 VOID DiagnosticPrint(CONST DIAGNOSTIC *Diagnostic);
+VOID DiagnosticPrintSummary(SIZE ErrorCount, SIZE WarningCount);

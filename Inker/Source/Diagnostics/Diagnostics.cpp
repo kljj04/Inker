@@ -250,7 +250,7 @@ VOID DiagnosticPrint(CONST DIAGNOSTIC *Diagnostic)
         HighlightStart = LineEnd;
     }
 
-    SIZE HighlightEnd = Start + (Diagnostic->Length > 0 ? Diagnostic->Length : 1);
+    SIZE HighlightEnd = Start + Diagnostic->Length;
 
     if (HighlightEnd < Start || HighlightEnd > LineEnd)
     {
@@ -290,4 +290,19 @@ VOID DiagnosticPrint(CONST DIAGNOSTIC *Diagnostic)
     }
 
     std::fprintf(stderr, "\033[0m\n");
+
+    if (!Diagnostic->FixIt.empty())
+    {
+        std::fprintf(stderr, " %*s | %*s\033[1;32m%s\033[0m\n", (INT32) GutterWidth, "", (INT32) MarkerOffset, "", Diagnostic->FixIt.c_str());
+    }
+}
+
+VOID DiagnosticPrintSummary(SIZE ErrorCount, SIZE WarningCount)
+{
+    if (ErrorCount == 0 && WarningCount == 0)
+    {
+        return;
+    }
+
+    std::fprintf(stderr, "%zu errors, %zu warnings generated.\n", ErrorCount, WarningCount);
 }

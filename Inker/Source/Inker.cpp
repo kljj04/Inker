@@ -7,6 +7,7 @@
 #include <Diagnostics/Messages.hpp>
 #include <Lexer/Lexer.hpp>
 #include <Parser/Parser.hpp>
+#include <StaticAnalyzer/StaticAnalyzer.hpp>
 #include <cstdio>
 #include <fstream>
 #include <iterator>
@@ -16,12 +17,14 @@ INT32 main(INT32 Argc, CHAR8 *Argv[])
     if (Argc < 2)
     {
         std::fprintf(stderr, "inker: \033[91merror:\033[0m no input files\n");
+        DiagnosticPrintSummary(1, 0);
         return 1;
     }
 
     if (Argc > 2)
     {
         std::fprintf(stderr, "inker: \033[91merror:\033[0m too many input files\n");
+        DiagnosticPrintSummary(1, 0);
         return 1;
     }
 
@@ -30,6 +33,7 @@ INT32 main(INT32 Argc, CHAR8 *Argv[])
     if (!File)
     {
         std::fprintf(stderr, "inker: \033[91merror:\033[0m cannot open file '%s'\n", Argv[1]);
+        DiagnosticPrintSummary(1, 0);
         return 1;
     }
 
@@ -38,36 +42,38 @@ INT32 main(INT32 Argc, CHAR8 *Argv[])
     if (File.bad())
     {
         std::fprintf(stderr, "inker: \033[91merror:\033[0m failed to read file '%s'\n", Argv[1]);
+        DiagnosticPrintSummary(1, 0);
         return 1;
     }
 
-    LEXER Lexer;
-    LexerInit(&Lexer, Source);
+    STATIC_ANALYZER Analyzer;
+    Analyzer.Options                = AnalyzerDefaultOptions(Argv[0]);
+    STRING Path                     = AnalyzerCanonicalPath(Argv[1]);
+    Analyzer.Options.Overlays[Path] = std::move(Source);
+    ANALYZER_UNIT *Entry            = StaticAnalyzerAnalyze(&Analyzer, Path);
+    SIZE           ErrorCount       = 0;
+    SIZE           WarningCount     = 0;
 
-    PARSER Parser;
-    ParserInit(&Parser, &Lexer);
-
-    AST_NODE *Root = ParserParse(&Parser);
-
-    if (Parser.ErrorMessage != DIAGNOSTIC_MESSAGE::NONE || Root == NULLPTR)
+    for (CONST DIAGNOSTIC &Diagnostic : Analyzer.Diagnostics)
     {
-        DIAGNOSTIC Diagnostic = {.Path = Argv[1], .Source = &Source, .Level = DIAGNOSTIC_LEVEL::ERROR};
-
-        if (Lexer.Error != LEXER_ERROR::NONE)
-        {
-            Diagnostic.Start   = Lexer.TokenStart;
-            Diagnostic.Length  = Lexer.TokenLength;
-            Diagnostic.Message = DiagnosticLexerMessage(Lexer.Error);
-        }
-        else
-        {
-            Diagnostic.Start   = Parser.ErrorStart;
-            Diagnostic.Length  = Parser.ErrorLength;
-            Diagnostic.Message = DiagnosticMessageString(Parser.ErrorMessage);
-        }
-
         DiagnosticPrint(&Diagnostic);
-        return 1;
+
+        if (Diagnostic.Level == DIAGNOSTIC_LEVEL::ERROR)
+        {
+            ErrorCount++;
+        }
+        else if (Diagnostic.Level == DIAGNOSTIC_LEVEL::WARNING)
+        {
+            WarningCount++;
+        }
     }
-    return 0;
+
+    if (Entry == NULLPTR && ErrorCount == 0)
+    {
+        std::fprintf(stderr, "inker: error: failed to load input file\n");
+        ErrorCount++;
+    }
+
+    DiagnosticPrintSummary(ErrorCount, WarningCount);
+    return ErrorCount > 0 ? 1 : 0;
 }

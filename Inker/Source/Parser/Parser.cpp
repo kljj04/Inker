@@ -1,453 +1,420 @@
-
- // Inker/Source/Parser/Parser.cpp
- // Inker Project
- // Copyright (C) 2026 Inker Developer kljj04
+// Inker/Source/Parser/Parser.cpp
+// Inker Project
+// Copyright (C) 2026 Inker Developer kljj04
 
 #include <Parser/Parser.hpp>
+#include <new>
+#include <algorithm>
 
-#include <cerrno>
-#include <cstdlib>
-
-STATIC BOOLEAN ParserHasError(PARSER *Parser)
+PARSER::~PARSER(VOID)
 {
-    return Parser->ErrorMessage != DIAGNOSTIC_MESSAGE::NONE;
+    ASTArenaDestroy(&Arena);
 }
 
-STATIC VOID ParserSetError(PARSER *Parser, DIAGNOSTIC_MESSAGE Message)
+VOID ParserDestroy(PARSER *Parser) NOEXCEPT
 {
-    if (ParserHasError(Parser))
-    {
-        return;
-    }
-
-    Parser->ErrorMessage = Message;
-    Parser->ErrorStart   = Parser->CurrentStart;
-    Parser->ErrorLength  = Parser->CurrentLength;
-}
-
-STATIC VOID ParserAdvance(PARSER *Parser)
-{
-    if (ParserHasError(Parser))
-    {
-        return;
-    }
-
-    Parser->Previous       = Parser->Current;
-    Parser->PreviousStart  = Parser->CurrentStart;
-    Parser->PreviousLength = Parser->CurrentLength;
-
-    Parser->Current       = LexerNextToken(Parser->Lexer);
-    Parser->CurrentStart  = Parser->Lexer->TokenStart;
-    Parser->CurrentLength = Parser->Lexer->TokenLength;
-
-    if (Parser->Current == TOKENS::TOKEN_UNKNOWN)
-    {
-        ParserSetError(Parser, DIAGNOSTIC_MESSAGE::UNEXPECTED_TOKEN);
-    }
-}
-
-STATIC BOOLEAN ParserMatch(PARSER *Parser, TOKENS Type)
-{
-    if (ParserHasError(Parser) || Parser->Current != Type)
-    {
-        return FALSE;
-    }
-
-    ParserAdvance(Parser);
-    return TRUE;
-}
-
-STATIC BOOLEAN ParserExpect(PARSER *Parser, TOKENS Type)
-{
-    if (ParserHasError(Parser))
-    {
-        return FALSE;
-    }
-
-    if (Parser->Current == Type)
-    {
-        ParserAdvance(Parser);
-        return !ParserHasError(Parser);
-    }
-
-    DIAGNOSTIC_MESSAGE Message = DIAGNOSTIC_MESSAGE::UNEXPECTED_TOKEN;
-
-    switch (Type)
-    {
-        case TOKENS::TOKEN_IDENTIFIER:
-        {
-            Message = DIAGNOSTIC_MESSAGE::EXPECTED_IDENTIFIER;
-            break;
-        }
-
-        case TOKENS::TOKEN_SP_SEMICOLON:
-        {
-            Message = DIAGNOSTIC_MESSAGE::EXPECTED_SEMICOLON;
-            break;
-        }
-
-        case TOKENS::TOKEN_SP_RIGHT_PAREN:
-        {
-            Message = DIAGNOSTIC_MESSAGE::EXPECTED_RIGHT_PAREN;
-            break;
-        }
-
-        default:
-        {
-            break;
-        }
-    }
-
-    ParserSetError(Parser, Message);
-    return FALSE;
-}
-
-STATIC STRING ParserTokenText(PARSER *Parser)
-{
-    return Parser->Lexer->Source.substr(Parser->CurrentStart, Parser->CurrentLength);
-}
-
-STATIC AST_NODE *ParserCreateNode(AST_NODE_TYPE Type)
-{
-    AST_NODE *Node = new AST_NODE{};
-
-    Node->Type = Type;
-
-    return Node;
-}
-
-STATIC VOID ParserFreeNode(AST_NODE *Node)
-{
-    if (Node == NULLPTR)
-    {
-        return;
-    }
-
-    ParserFreeNode(Node->Left);
-    ParserFreeNode(Node->Right);
-    ParserFreeNode(Node->Expression);
-
-    for (SIZE Index = 0; Index < Node->StatementCount; Index++)
-    {
-        ParserFreeNode(Node->Statements[Index]);
-    }
-
-    delete[] Node->Statements;
-    delete Node;
-}
-
-STATIC AST_NODE *ParserParseExpression(PARSER *Parser);
-
-STATIC AST_NODE *ParserParsePrimary(PARSER *Parser)
-{
-    if (ParserHasError(Parser))
-    {
-        return NULLPTR;
-    }
-
-    if (Parser->Current == TOKENS::TOKEN_LIT_INTEGER)
-    {
-        STRING Text = ParserTokenText(Parser);
-        CHAR8 *End  = NULLPTR;
-
-        errno = 0;
-
-        CONST CHAR8 *Start = Text.c_str();
-        INT64 Value = std::strtoll(Start, &End, 0);
-
-        if (End == Start || *End != '\0' || errno == ERANGE)
-        {
-            ParserSetError(Parser, DIAGNOSTIC_MESSAGE::INVALID_NUMBER);
-            return NULLPTR;
-        }
-
-        AST_NODE *Node = ParserCreateNode(AST_NODE_TYPE::INTEGER);
-
-        Node->Integer = Value;
-
-        ParserAdvance(Parser);
-
-        if (ParserHasError(Parser))
-        {
-            ParserFreeNode(Node);
-            return NULLPTR;
-        }
-
-        return Node;
-    }
-
-    if (Parser->Current == TOKENS::TOKEN_IDENTIFIER)
-    {
-        AST_NODE *Node = ParserCreateNode(AST_NODE_TYPE::IDENTIFIER);
-
-        Node->Name = ParserTokenText(Parser);
-
-        ParserAdvance(Parser);
-
-        if (ParserHasError(Parser))
-        {
-            ParserFreeNode(Node);
-            return NULLPTR;
-        }
-
-        return Node;
-    }
-
-    if (Parser->Current == TOKENS::TOKEN_SP_LEFT_PAREN)
-    {
-        ParserAdvance(Parser);
-
-        AST_NODE *Node = ParserParseExpression(Parser);
-
-        if (ParserHasError(Parser))
-        {
-            ParserFreeNode(Node);
-            return NULLPTR;
-        }
-
-        if (!ParserExpect(Parser, TOKENS::TOKEN_SP_RIGHT_PAREN))
-        {
-            ParserFreeNode(Node);
-            return NULLPTR;
-        }
-
-        return Node;
-    }
-
-    ParserSetError(Parser, DIAGNOSTIC_MESSAGE::EXPECTED_EXPRESSION);
-    return NULLPTR;
-}
-
-STATIC AST_NODE *ParserParseUnary(PARSER *Parser)
-{
-    if (ParserHasError(Parser))
-    {
-        return NULLPTR;
-    }
-
-    if (Parser->Current == TOKENS::TOKEN_OP_PLUS ||
-        Parser->Current == TOKENS::TOKEN_OP_MINUS ||
-        Parser->Current == TOKENS::TOKEN_OP_NOT ||
-        Parser->Current == TOKENS::TOKEN_OP_BIT_NOT)
-    {
-        TOKENS Operator = Parser->Current;
-
-        ParserAdvance(Parser);
-
-        AST_NODE *Expression = ParserParseUnary(Parser);
-
-        if (ParserHasError(Parser))
-        {
-            ParserFreeNode(Expression);
-            return NULLPTR;
-        }
-
-        AST_NODE *Node = ParserCreateNode(AST_NODE_TYPE::UNARY);
-
-        Node->Operator   = Operator;
-        Node->Expression = Expression;
-
-        return Node;
-    }
-
-    return ParserParsePrimary(Parser);
-}
-
-STATIC AST_NODE *ParserParseMultiplicative(PARSER *Parser)
-{
-    AST_NODE *Left = ParserParseUnary(Parser);
-
-    if (ParserHasError(Parser))
-    {
-        ParserFreeNode(Left);
-        return NULLPTR;
-    }
-
-    while (!ParserHasError(Parser) &&
-           (Parser->Current == TOKENS::TOKEN_OP_MULTIPLY ||
-            Parser->Current == TOKENS::TOKEN_OP_DIVIDE ||
-            Parser->Current == TOKENS::TOKEN_OP_MODULO))
-    {
-        TOKENS Operator = Parser->Current;
-
-        ParserAdvance(Parser);
-
-        AST_NODE *Right = ParserParseUnary(Parser);
-
-        if (ParserHasError(Parser))
-        {
-            ParserFreeNode(Left);
-            ParserFreeNode(Right);
-            return NULLPTR;
-        }
-
-        AST_NODE *Node = ParserCreateNode(AST_NODE_TYPE::BINARY);
-
-        Node->Operator = Operator;
-        Node->Left     = Left;
-        Node->Right    = Right;
-
-        Left = Node;
-    }
-
-    return Left;
-}
-
-STATIC AST_NODE *ParserParseAdditive(PARSER *Parser)
-{
-    AST_NODE *Left = ParserParseMultiplicative(Parser);
-
-    if (ParserHasError(Parser))
-    {
-        ParserFreeNode(Left);
-        return NULLPTR;
-    }
-
-    while (!ParserHasError(Parser) &&
-           (Parser->Current == TOKENS::TOKEN_OP_PLUS ||
-            Parser->Current == TOKENS::TOKEN_OP_MINUS))
-    {
-        TOKENS Operator = Parser->Current;
-
-        ParserAdvance(Parser);
-
-        AST_NODE *Right = ParserParseMultiplicative(Parser);
-
-        if (ParserHasError(Parser))
-        {
-            ParserFreeNode(Left);
-            ParserFreeNode(Right);
-            return NULLPTR;
-        }
-
-        AST_NODE *Node = ParserCreateNode(AST_NODE_TYPE::BINARY);
-
-        Node->Operator = Operator;
-        Node->Left     = Left;
-        Node->Right    = Right;
-
-        Left = Node;
-    }
-
-    return Left;
-}
-
-STATIC AST_NODE *ParserParseExpression(PARSER *Parser)
-{
-    return ParserParseAdditive(Parser);
-}
-
-STATIC AST_NODE *ParserParseVariableDeclaration(PARSER *Parser)
-{
-    ParserAdvance(Parser);
-
-    if (!ParserExpect(Parser, TOKENS::TOKEN_IDENTIFIER))
-    {
-        return NULLPTR;
-    }
-
-    AST_NODE *Node = ParserCreateNode(AST_NODE_TYPE::VARIABLE_DECLARATION);
-
-    Node->Name = Parser->Lexer->Source.substr(Parser->PreviousStart, Parser->PreviousLength);
-
-    if (!ParserExpect(Parser, TOKENS::TOKEN_OP_ASSIGN))
-    {
-        ParserFreeNode(Node);
-        return NULLPTR;
-    }
-
-    Node->Expression = ParserParseExpression(Parser);
-
-    if (ParserHasError(Parser))
-    {
-        ParserFreeNode(Node);
-        return NULLPTR;
-    }
-
-    if (!ParserExpect(Parser, TOKENS::TOKEN_SP_SEMICOLON))
-    {
-        ParserFreeNode(Node);
-        return NULLPTR;
-    }
-
-    return Node;
-}
-
-STATIC AST_NODE *ParserParseStatement(PARSER *Parser)
-{
-    if (Parser->Current == TOKENS::TOKEN_KW_SET)
-    {
-        return ParserParseVariableDeclaration(Parser);
-    }
-
-    AST_NODE *Node = ParserCreateNode(AST_NODE_TYPE::EXPRESSION_STATEMENT);
-
-    Node->Expression = ParserParseExpression(Parser);
-
-    if (ParserHasError(Parser))
-    {
-        ParserFreeNode(Node);
-        return NULLPTR;
-    }
-
-    if (!ParserExpect(Parser, TOKENS::TOKEN_SP_SEMICOLON))
-    {
-        ParserFreeNode(Node);
-        return NULLPTR;
-    }
-
-    return Node;
+    ASTArenaDestroy(&Parser->Arena);
+    Parser->Root = NULLPTR;
+    Parser->Tokens.clear();
+    Parser->Diagnostics.clear();
+    Parser->TypeNames.clear();
+    Parser->Parsed = FALSE;
 }
 
 VOID ParserInit(PARSER *Parser, LEXER *Lexer)
 {
-    *Parser = {};
+    ParserDestroy(Parser);
+    Parser->Lexer        = Lexer;
+    Parser->Current      = TOKENS::TOKEN_EOF;
+    Parser->Previous     = TOKENS::TOKEN_EOF;
+    Parser->CurrentStart = Parser->CurrentLength = 0;
+    Parser->PreviousStart = Parser->PreviousLength = 0;
+    Parser->ErrorMessage                           = DIAGNOSTIC_MESSAGE::NONE;
+    Parser->ErrorArgument.clear();
+    Parser->ErrorStart = Parser->ErrorLength = 0;
+    Parser->Position = Parser->Depth = Parser->LoopDepth = Parser->FunctionDepth = 0;
+}
 
-    Parser->Lexer = Lexer;
+TOKENS ParserPeek(CONST PARSER *Parser, SIZE Offset)
+{
+    if (Parser->Position >= Parser->Tokens.size() || Offset >= Parser->Tokens.size() - Parser->Position)
+    {
+        return TOKENS::TOKEN_EOF;
+    }
+
+    return Parser->Tokens[Parser->Position + Offset].Type;
+}
+
+AST_LOC ParserLocation(CONST PARSER *Parser)
+{
+    return Parser->Tokens.empty() ? AST_LOC{} : Parser->Tokens[Parser->Position].Location;
+}
+
+VOID ParserAdvance(PARSER *Parser)
+{
+    Parser->Previous       = Parser->Current;
+    Parser->PreviousStart  = Parser->CurrentStart;
+    Parser->PreviousLength = Parser->CurrentLength;
+
+    if (Parser->Position + 1 < Parser->Tokens.size())
+    {
+        Parser->Position++;
+    }
+
+    Parser->Current       = ParserPeek(Parser);
+    AST_LOC Location      = ParserLocation(Parser);
+    Parser->CurrentStart  = Location.Start;
+    Parser->CurrentLength = Location.Length;
+}
+
+BOOLEAN ParserMatch(PARSER *Parser, TOKENS Token)
+{
+    if (ParserPeek(Parser) != Token)
+    {
+        return FALSE;
+    }
 
     ParserAdvance(Parser);
+
+    return TRUE;
+}
+
+STATIC AST_LOC ParserInsertionLocation(CONST PARSER *Parser)
+{
+    if (Parser->Position == 0)
+    {
+        AST_LOC Location = ParserLocation(Parser);
+        Location.Length  = 0;
+        return Location;
+    }
+
+    AST_LOC Location = Parser->Tokens[Parser->Position - 1].Location;
+    SIZE    End      = Location.Start + Location.Length;
+
+    for (SIZE Index = Location.Start; Index < End; Index++)
+    {
+        if (Parser->Lexer->Source[Index] == '\n')
+        {
+            Location.Line++;
+            Location.Column = 1;
+        }
+        else
+        {
+            Location.Column++;
+        }
+    }
+
+    Location.Start  = End;
+    Location.Length = 0;
+    return Location;
+}
+
+VOID ParserConsume(PARSER *Parser, TOKENS Token, STRING_VIEW Expected, STRING_VIEW Context)
+{
+    if (ParserMatch(Parser, Token))
+    {
+        return;
+    }
+
+    if (Token == TOKENS::TOKEN_SP_SEMICOLON)
+    {
+        ParserFailAt(Parser, ParserInsertionLocation(Parser), DIAGNOSTIC_MESSAGE::MISSING_SEMICOLON, Context, ";");
+    }
+
+    if (Token == TOKENS::TOKEN_IDENTIFIER)
+    {
+        ParserFail(Parser, DIAGNOSTIC_MESSAGE::EXPECTED_NAME, Expected);
+    }
+
+    AST_LOC Location  = ParserLocation(Parser);
+    AST_LOC Insertion = ParserInsertionLocation(Parser);
+    BOOLEAN Closing   = Token == TOKENS::TOKEN_SP_RPAREN || Token == TOKENS::TOKEN_SP_RBRACKET || Token == TOKENS::TOKEN_SP_RBRACE || Token == TOKENS::TOKEN_SP_INTERPOLATION_END;
+    BOOLEAN Boundary  = ParserPeek(Parser) == TOKENS::TOKEN_EOF || ParserPeek(Parser) == TOKENS::TOKEN_SP_RBRACE || ParserPeek(Parser) == TOKENS::TOKEN_SP_SEMICOLON || Location.Line > Insertion.Line;
+
+    if (Closing && Boundary)
+    {
+        Location = Insertion;
+    }
+
+    ParserFailAt(Parser, Location, DIAGNOSTIC_MESSAGE::EXPECTED_TOKEN, Expected, Closing && Boundary ? Expected : STRING_VIEW{});
+}
+
+STRING_VIEW ParserText(CONST PARSER *Parser)
+{
+    return STRING_VIEW(Parser->Lexer->Source).substr(Parser->CurrentStart, Parser->CurrentLength);
+}
+
+AST_LOC ParserFinish(CONST PARSER *Parser, AST_LOC Start)
+{
+    SIZE End     = Parser->PreviousStart + Parser->PreviousLength;
+    Start.Length = End >= Start.Start ? End - Start.Start : Start.Length;
+
+    return Start;
+}
+
+NORETURN VOID ParserFail(PARSER *Parser, DIAGNOSTIC_MESSAGE Message, STRING_VIEW Argument, STRING_VIEW FixIt)
+{
+    ParserFailAt(Parser, ParserLocation(Parser), Message, Argument, FixIt);
+}
+
+VOID ParserReport(PARSER *Parser, DIAGNOSTIC_LEVEL Level, AST_LOC Location, DIAGNOSTIC_MESSAGE Message, STRING_VIEW Argument, STRING_VIEW FixIt)
+{
+    if (Argument.empty() && Parser->Lexer != NULLPTR)
+    {
+        Argument = STRING_VIEW(Parser->Lexer->Source).substr(Location.Start, Location.Length);
+    }
+
+    if (Level == DIAGNOSTIC_LEVEL::ERROR && Parser->ErrorMessage == DIAGNOSTIC_MESSAGE::NONE)
+    {
+        Parser->ErrorMessage  = Message;
+        Parser->ErrorArgument = Argument;
+        Parser->ErrorStart    = Location.Start;
+        Parser->ErrorLength   = Location.Length;
+    }
+
+    Parser->Diagnostics.push_back({Message, STRING(Argument), Location, Level, STRING(FixIt)});
+}
+
+NORETURN VOID ParserFailAt(PARSER *Parser, AST_LOC Location, DIAGNOSTIC_MESSAGE Message, STRING_VIEW Argument, STRING_VIEW FixIt)
+{
+    ParserReport(Parser, DIAGNOSTIC_LEVEL::ERROR, Location, Message, Argument, FixIt);
+    throw PARSER_FAILURE{};
+}
+
+PARSER_DEPTH::PARSER_DEPTH(PARSER *Value) : Parser(Value)
+{
+    if (Parser->Depth >= 128)
+    {
+        ParserFail(Parser, DIAGNOSTIC_MESSAGE::NESTING_LIMIT);
+    }
+
+    Parser->Depth++;
+}
+
+PARSER_DEPTH::~PARSER_DEPTH(VOID)
+{
+    Parser->Depth--;
+}
+
+AST_NODE *ParserNode(PARSER *Parser, AST_NODE_TYPE Type, AST_LOC Location)
+{
+    AST_NODE *Node = ASTCreateNode(&Parser->Arena, Type, Location);
+
+    if (Node == NULLPTR)
+    {
+        throw std::bad_alloc{};
+    }
+
+    return Node;
+}
+
+VOID ParserAppend(PARSER *Parser, AST_NODE_LIST *List, AST_NODE *Node)
+{
+    if (!ASTNodeListAppend(&Parser->Arena, List, Node))
+    {
+        throw std::bad_alloc{};
+    }
+}
+
+VOID ParserRecover(PARSER *Parser, SIZE Start, BOOLEAN InBlock)
+{
+    SIZE Braces   = 0;
+    SIZE Parens   = 0;
+    SIZE Brackets = 0;
+
+    for (SIZE Index = Start; Index < Parser->Position; Index++)
+    {
+        TOKENS Token = Parser->Tokens[Index].Type;
+
+        if (Token == TOKENS::TOKEN_SP_LPAREN)
+        {
+            Parens++;
+        }
+        else if (Token == TOKENS::TOKEN_SP_RPAREN && Parens > 0)
+        {
+            Parens--;
+        }
+        else if (Token == TOKENS::TOKEN_SP_LBRACKET)
+        {
+            Brackets++;
+        }
+        else if (Token == TOKENS::TOKEN_SP_RBRACKET && Brackets > 0)
+        {
+            Brackets--;
+        }
+
+        if (Token == TOKENS::TOKEN_SP_LBRACE)
+        {
+            Braces++;
+        }
+        else if (Token == TOKENS::TOKEN_SP_RBRACE && Braces > 0)
+        {
+            Braces--;
+        }
+    }
+
+    while (ParserPeek(Parser) != TOKENS::TOKEN_EOF)
+    {
+        TOKENS Token = ParserPeek(Parser);
+
+        if (Braces == 0)
+        {
+            if (Token == TOKENS::TOKEN_SP_RBRACE && InBlock)
+            {
+                return;
+            }
+
+            if (Token == TOKENS::TOKEN_SP_SEMICOLON)
+            {
+                ParserAdvance(Parser);
+                return;
+            }
+
+            if (Parser->Position > Start && Parens == 0 && Brackets == 0 && Token == TOKENS::TOKEN_IDENTIFIER && ParserLocation(Parser).Line > Parser->Tokens[Parser->Position - 1].Location.Line)
+            {
+                return;
+            }
+
+            if (Parser->Position > Start && (ParserIsDeclaration(Parser) || Token == TOKENS::TOKEN_KW_IF || Token == TOKENS::TOKEN_KW_WHILE || Token == TOKENS::TOKEN_KW_FOR || Token == TOKENS::TOKEN_KW_RETURN))
+            {
+                return;
+            }
+        }
+
+        if (Token == TOKENS::TOKEN_SP_LPAREN)
+        {
+            Parens++;
+        }
+        else if (Token == TOKENS::TOKEN_SP_RPAREN && Parens > 0)
+        {
+            Parens--;
+        }
+        else if (Token == TOKENS::TOKEN_SP_LBRACKET)
+        {
+            Brackets++;
+        }
+        else if (Token == TOKENS::TOKEN_SP_RBRACKET && Brackets > 0)
+        {
+            Brackets--;
+        }
+
+        if (Token == TOKENS::TOKEN_SP_LBRACE)
+        {
+            Braces++;
+        }
+        else if (Token == TOKENS::TOKEN_SP_RBRACE && Braces > 0)
+        {
+            Braces--;
+        }
+
+        ParserAdvance(Parser);
+
+        if (Braces == 0 && Token == TOKENS::TOKEN_SP_RBRACE)
+        {
+            return;
+        }
+    }
+}
+
+VOID ParserSequence(PARSER *Parser, AST_NODE_LIST *List, BOOLEAN InBlock, BOOLEAN Members)
+{
+    while (ParserPeek(Parser) != TOKENS::TOKEN_EOF && !(InBlock && ParserPeek(Parser) == TOKENS::TOKEN_SP_RBRACE))
+    {
+        SIZE Start = Parser->Position;
+        SIZE Count = List->Count;
+
+        try
+        {
+            TOKENS Token = ParserPeek(Parser);
+
+            if ((Members || Parser->FunctionDepth == 0) && (Token == TOKENS::TOKEN_KW_PUBLIC || Token == TOKENS::TOKEN_KW_PRIVATE || Token == TOKENS::TOKEN_KW_PROTECTED))
+            {
+                AST_NODE *Access                = ParserNode(Parser, AST_NODE_TYPE::ACCESS_MODIFIER, ParserLocation(Parser));
+                Access->AccessModifier.Modifier = Token;
+                ParserAdvance(Parser);
+                ParserAppend(Parser, List, Access);
+            }
+
+            AST_NODE *Node;
+
+            if (Members)
+            {
+                Node = ParserDeclaration(Parser, TRUE);
+            }
+            else
+            {
+                Node = ParserIsDeclaration(Parser) ? ParserDeclaration(Parser) : ParserStatement(Parser);
+            }
+
+            ParserAppend(Parser, List, Node);
+        }
+        catch (CONST PARSER_FAILURE &)
+        {
+            List->Count = Count;
+            ParserRecover(Parser, Start, InBlock);
+        }
+    }
 }
 
 AST_NODE *ParserParse(PARSER *Parser)
 {
-    if (ParserHasError(Parser))
+    if (Parser->Parsed)
     {
-        return NULLPTR;
+        return Parser->ErrorMessage == DIAGNOSTIC_MESSAGE::NONE ? Parser->Root : NULLPTR;
     }
 
-    AST_NODE *Root = ParserCreateNode(AST_NODE_TYPE::BLOCK);
+    Parser->Parsed = TRUE;
 
-    while (!ParserHasError(Parser) && Parser->Current != TOKENS::TOKEN_EOF)
+    try
     {
-        AST_NODE *Statement = ParserParseStatement(Parser);
-
-        if (ParserHasError(Parser) || Statement == NULLPTR)
+        if (Parser->Lexer == NULLPTR)
         {
-            ParserFreeNode(Statement);
-            ParserFreeNode(Root);
-            return NULLPTR;
+            ParserFail(Parser, DIAGNOSTIC_MESSAGE::INVALID_ARGUMENT, "null lexer");
         }
 
-        AST_NODE **Statements = new AST_NODE *[Root->StatementCount + 1];
-
-        for (SIZE Index = 0; Index < Root->StatementCount; Index++)
+        for (;;)
         {
-            Statements[Index] = Root->Statements[Index];
+            SIZE    Frames   = Parser->Lexer->FrameCount;
+            BOOLEAN InString = Frames > 0 && Parser->Lexer->Frames[Frames - 1].Mode == LEXER_MODE::STRING;
+            TOKENS  Token    = LexerNextToken(Parser->Lexer);
+            AST_LOC Location{Parser->Lexer->TokenStart, Parser->Lexer->TokenLength, Parser->Lexer->TokenLine, Parser->Lexer->TokenColumn};
+            Parser->Tokens.push_back({Token, Location, Token == TOKENS::TOKEN_LIT_STRING && (InString ? Parser->Lexer->FrameCount < Frames : Parser->Lexer->FrameCount == Frames)});
+
+            if (Token == TOKENS::TOKEN_UNKNOWN || Token == TOKENS::TOKEN_EOF)
+            {
+                break;
+            }
         }
 
-        Statements[Root->StatementCount] = Statement;
+        Parser->Position      = 0;
+        Parser->Current       = ParserPeek(Parser);
+        Parser->CurrentStart  = ParserLocation(Parser).Start;
+        Parser->CurrentLength = ParserLocation(Parser).Length;
 
-        delete[] Root->Statements;
+        if (Parser->Tokens.back().Type == TOKENS::TOKEN_UNKNOWN)
+        {
+            Parser->Position      = Parser->Tokens.size() - 1;
+            Parser->Current       = ParserPeek(Parser);
+            Parser->CurrentStart  = ParserLocation(Parser).Start;
+            Parser->CurrentLength = ParserLocation(Parser).Length;
+            ParserFail(Parser, DIAGNOSTIC_MESSAGE::UNEXPECTED_TOKEN);
+        }
 
-        Root->Statements = Statements;
-        Root->StatementCount++;
+        Parser->Root = ParserNode(Parser, AST_NODE_TYPE::PROGRAM, {0, Parser->Lexer->Source.size(), 1, 1});
+        ParserSequence(Parser, &Parser->Root->Program, FALSE);
     }
-
-    if (ParserHasError(Parser))
+    catch (CONST PARSER_FAILURE &)
     {
-        ParserFreeNode(Root);
-        return NULLPTR;
+        Parser->Root = NULLPTR;
+    }
+    catch (CONST std::bad_alloc &)
+    {
+        Parser->ErrorMessage = DIAGNOSTIC_MESSAGE::INTERNAL_ERROR;
+        Parser->ErrorArgument.clear();
+        Parser->ErrorStart  = Parser->CurrentStart;
+        Parser->ErrorLength = Parser->CurrentLength;
+        Parser->Root        = NULLPTR;
     }
 
-    return Root;
+    return Parser->ErrorMessage == DIAGNOSTIC_MESSAGE::NONE ? Parser->Root : NULLPTR;
 }

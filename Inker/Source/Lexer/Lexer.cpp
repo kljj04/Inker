@@ -212,16 +212,46 @@ STATIC TOKENS LexerIdentifyKW(LEXER *Lexer)
         LexerAdvance(Lexer);
     }
 
-    STRING Value = Lexer->Source.substr(Lexer->TokenStart, Lexer->Position - Lexer->TokenStart);
+    STRING_VIEW Value(Lexer->Source.data() + Lexer->TokenStart, Lexer->Position - Lexer->TokenStart);
+
+    if (Value == "use")
+    {
+        return TOKENS::TOKEN_KW_USE;
+    }
+
+    if (Value == "import")
+    {
+        return TOKENS::TOKEN_KW_IMPORT;
+    }
+
+    if (Value == "as")
+    {
+        return TOKENS::TOKEN_KW_AS;
+    }
 
     if (Value == "set")
     {
         return TOKENS::TOKEN_KW_SET;
     }
 
-    if (Value == "return")
+    if (Value == "namespace")
     {
-        return TOKENS::TOKEN_KW_RETURN;
+        return TOKENS::TOKEN_KW_NAMESPACE;
+    }
+
+    if (Value == "struct")
+    {
+        return TOKENS::TOKEN_KW_STRUCT;
+    }
+
+    if (Value == "enum")
+    {
+        return TOKENS::TOKEN_KW_ENUM;
+    }
+
+    if (Value == "class")
+    {
+        return TOKENS::TOKEN_KW_CLASS;
     }
 
     if (Value == "if")
@@ -254,6 +284,11 @@ STATIC TOKENS LexerIdentifyKW(LEXER *Lexer)
         return TOKENS::TOKEN_KW_CONTINUE;
     }
 
+    if (Value == "return")
+    {
+        return TOKENS::TOKEN_KW_RETURN;
+    }
+
     if (Value == "true")
     {
         return TOKENS::TOKEN_KW_TRUE;
@@ -267,6 +302,131 @@ STATIC TOKENS LexerIdentifyKW(LEXER *Lexer)
     if (Value == "null")
     {
         return TOKENS::TOKEN_KW_NULL;
+    }
+
+    if (Value == "long")
+    {
+        return TOKENS::TOKEN_KW_LONG;
+    }
+
+    if (Value == "signed")
+    {
+        return TOKENS::TOKEN_KW_SIGNED;
+    }
+
+    if (Value == "unsigned")
+    {
+        return TOKENS::TOKEN_KW_UNSIGNED;
+    }
+
+    if (Value == "public" || Value == "PUBLIC" || Value == "Public")
+    {
+        return TOKENS::TOKEN_KW_PUBLIC;
+    }
+
+    if (Value == "private" || Value == "PRIVATE" || Value == "Private")
+    {
+        return TOKENS::TOKEN_KW_PRIVATE;
+    }
+
+    if (Value == "protected" || Value == "PROTECTED" || Value == "Protected")
+    {
+        return TOKENS::TOKEN_KW_PROTECTED;
+    }
+
+    if (Value == "VOID" || Value == "void")
+    {
+        return TOKENS::TOKEN_TYPE_VOID;
+    }
+
+    if (Value == "bool" || Value == "boolean" || Value == "BOOL" || Value == "BOOLEAN")
+    {
+        return TOKENS::TOKEN_TYPE_BOOLEAN;
+    }
+
+    if (Value == "string" || Value == "STRING")
+    {
+        return TOKENS::TOKEN_TYPE_STRING;
+    }
+
+    if (Value == "INT8")
+    {
+        return TOKENS::TOKEN_TYPE_INT8;
+    }
+
+    if (Value == "INT16" || Value == "short")
+    {
+        return TOKENS::TOKEN_TYPE_INT16;
+    }
+
+    if (Value == "INT32" || Value == "int")
+    {
+        return TOKENS::TOKEN_TYPE_INT32;
+    }
+
+    if (Value == "INT64")
+    {
+        return TOKENS::TOKEN_TYPE_INT64;
+    }
+
+    if (Value == "UINT8")
+    {
+        return TOKENS::TOKEN_TYPE_UINT8;
+    }
+
+    if (Value == "UINT16")
+    {
+        return TOKENS::TOKEN_TYPE_UINT16;
+    }
+
+    if (Value == "UINT32")
+    {
+        return TOKENS::TOKEN_TYPE_UINT32;
+    }
+
+    if (Value == "UINT64")
+    {
+        return TOKENS::TOKEN_TYPE_UINT64;
+    }
+
+    if (Value == "FLOAT32" || Value == "float" || Value == "FLOAT")
+    {
+        return TOKENS::TOKEN_TYPE_FLOAT32;
+    }
+
+    if (Value == "FLOAT64" || Value == "double")
+    {
+        return TOKENS::TOKEN_TYPE_FLOAT64;
+    }
+
+    if (Value == "char" || Value == "CHAR8")
+    {
+        return TOKENS::TOKEN_TYPE_CHAR8;
+    }
+
+    if (Value == "CHAR16")
+    {
+        return TOKENS::TOKEN_TYPE_CHAR16;
+    }
+
+    if (Value == "AUTO8")
+    {
+        return TOKENS::TOKEN_TYPE_AUTO8;
+    }
+
+    if (Value == "AUTO16")
+    {
+        return TOKENS::TOKEN_TYPE_AUTO16;
+    }
+
+    if (Value == "AUTO32" || Value == "auto")
+    {
+        return TOKENS::TOKEN_TYPE_AUTO32;
+    }
+
+    if (Value == "AUTO64")
+    {
+        return TOKENS::TOKEN_TYPE_AUTO64;
     }
 
     return TOKENS::TOKEN_IDENTIFIER;
@@ -656,22 +816,22 @@ STATIC TOKENS LexerIdentifyOP(LEXER *Lexer)
 
         case '(':
         {
-            return TOKENS::TOKEN_SP_LEFT_PAREN;
+            return TOKENS::TOKEN_SP_LPAREN;
         }
 
         case ')':
         {
-            return TOKENS::TOKEN_SP_RIGHT_PAREN;
+            return TOKENS::TOKEN_SP_RPAREN;
         }
 
         case '{':
         {
-            return TOKENS::TOKEN_SP_LEFT_BRACE;
+            return TOKENS::TOKEN_SP_LBRACE;
         }
 
         case '}':
         {
-            return TOKENS::TOKEN_SP_RIGHT_BRACE;
+            return TOKENS::TOKEN_SP_RBRACE;
         }
 
         case '[':
@@ -686,7 +846,7 @@ STATIC TOKENS LexerIdentifyOP(LEXER *Lexer)
                 }
             }
 
-            return TOKENS::TOKEN_SP_LEFT_BRACKET;
+            return TOKENS::TOKEN_SP_LBRACKET;
         }
 
         case ']':
@@ -707,7 +867,7 @@ STATIC TOKENS LexerIdentifyOP(LEXER *Lexer)
                 }
             }
 
-            return TOKENS::TOKEN_SP_RIGHT_BRACKET;
+            return TOKENS::TOKEN_SP_RBRACKET;
         }
 
         case ',':

@@ -10,9 +10,11 @@ BASE_DIR="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 
 MAKEFILE="${BASE_DIR}/Makefiles/Makefile"
 TARGET="${BASE_DIR}/Build/inker"
+DAEMON_TARGET="${BASE_DIR}/Build/inkerd"
 
 INSTALL_DIR="${HOME}/.local/bin"
 INSTALL_TARGET="${INSTALL_DIR}/inker"
+DAEMON_INSTALL_TARGET="${INSTALL_DIR}/inkerd"
 
 JOBS="$(nproc)"
 
@@ -66,8 +68,8 @@ ShowUsage()
 Usage: ./Scripts/Run.sh [OPTION]
 
 Options:
-  -b, --build       Build Inker only
-  -i, --install     Build and install Inker (default)
+  -b, --build       Build Inker and Inkerd
+  -i, --install     Build and install Inker and Inkerd (default)
   -c, --clean       Remove build artifacts
   -R, --rebuild     Clean, build and install Inker
   -f, --format      Format C++ source files
@@ -119,15 +121,16 @@ Install()
 {
     Info "Installing Inker..."
 
-    if [[ ! -f "${TARGET}" ]]; then
+    if [[ ! -f "${TARGET}" || ! -f "${DAEMON_TARGET}" ]]; then
         Error "Build output not found: ${TARGET}"
         return 1
     fi
 
     mkdir -p "${INSTALL_DIR}"
     install -m 755 "${TARGET}" "${INSTALL_TARGET}"
+    install -m 755 "${DAEMON_TARGET}" "${DAEMON_INSTALL_TARGET}"
 
-    Success "Installed to ${INSTALL_TARGET}"
+    Success "Installed to ${INSTALL_TARGET} and ${DAEMON_INSTALL_TARGET}"
 
     if [[ ":${PATH}:" != *":${INSTALL_DIR}:"* ]]; then
         Warning "${INSTALL_DIR} is not in PATH."
@@ -158,14 +161,14 @@ Format()
 
 Uninstall()
 {
-    if [[ ! -e "${INSTALL_TARGET}" ]]; then
+    if [[ ! -e "${INSTALL_TARGET}" && ! -e "${DAEMON_INSTALL_TARGET}" ]]; then
         Warning "Inker is not installed."
         return 0
     fi
 
     Info "Uninstalling Inker..."
 
-    rm -f -- "${INSTALL_TARGET}"
+    rm -f -- "${INSTALL_TARGET}" "${DAEMON_INSTALL_TARGET}"
 
     Success "Inker uninstalled."
 }
